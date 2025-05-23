@@ -97,14 +97,15 @@ def load_prefs():
         try:
             return orjson.loads(PREF_FILE.read_bytes())
         except:
-            DEFAULT_PREFS = {
-                "crowd_weight": 2.0,
-                "max_crowd": 4,
-                "mode_penalty": {"SUBWAY": 10.0, "BUS": 0.0, "WALK": 2.0},
-                "mode_preference": {"SUBWAY": 0.0, "BUS": 10.0, "WALK": 1.0},
-                "walk_limit_min": 15,
-                "runs": 0,
-            }
+            pass
+    DEFAULT_PREFS = {
+        "crowd_weight": 2.0,
+        "max_crowd": 4,
+        "mode_penalty": {"SUBWAY": 10.0, "BUS": 0.0, "WALK": 2.0},
+        "mode_preference": {"SUBWAY": 0.0, "BUS": 10.0, "WALK": 1.0},
+        "walk_limit_min": 15,
+        "runs": 0,
+    }
     return DEFAULT_PREFS.copy()
 
 
