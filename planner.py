@@ -105,7 +105,7 @@ def load_prefs():
                 "walk_limit_min": 15,
                 "runs": 0,
             }
-        return DEFAULT_PREFS.copy()
+    return DEFAULT_PREFS.copy()
 
 
 def save_prefs(prefs: Dict):
