@@ -160,12 +160,18 @@ if st.button("🚀  경로 탐색"):
 
     # ── 지도 -------------------------------------------------------------
     # 🌐 HTML 결과 파일 이름에 타임스탬프를 붙여 브라우저 캐싱 문제 방지
-    map_obj, html_path = draw_map(segs, origin, dest)   # ← 두 변수로 받기
+    map_obj, html_path = draw_map(segs, origin, dest)   # ← 언팩!
 
-    # st_folium에는 Map 객체 그대로 전달
+    # (타임스탬프 붙이는 코드가 필요하다면 html_path에만 적용)
+    unique_path = html_path.with_stem(
+        html_path.stem + f"_{int(datetime.now().timestamp())}"
+    )
+    html_path.replace(unique_path)
+    html_path = unique_path
+
     if st_folium:
         st.subheader("🗺️  경로 지도")
-        st_folium(map_obj, width=900, height=600)       # ← OK
+        st_folium(map_obj, width=900, height=600)       # Map 객체를 직접 전달
     else:
         import webbrowser
         webbrowser.open(html_path.as_uri())
