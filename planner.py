@@ -379,17 +379,7 @@ def crowd_gradient_color(level: int, max_level: int = 4) -> str:
     g = int(255 * (1 - ratio))
     return f"#{r:02x}{g:02x}00"
 
-
 def draw_map(segs: list[dict], o: tuple[float, float], d: tuple[float, float]):
-    """
-    folium을 이용해 경로를 시각화합니다.
-    - 외곽선과 중심선 굵기는 상단 상수 OUTER_LINE_WEIGHT, CENTER_LINE_WEIGHT로 조정 가능
-    - 외곽선: 모드/호선별 진한 색상, weight=OUTER_LINE_WEIGHT
-    - 중심선: 혼잡도 기반 그라디언트, weight=CENTER_LINE_WEIGHT
-    - 정차 지점마다 혼잡도 원형 마커
-    - 환승 지점에 특별 아이콘 표시
-    - 레이어 컨트롤로 토글 가능
-    """
     m = folium.Map(location=[(o[0] + d[0]) / 2, (o[1] + d[1]) / 2], zoom_start=13)
     folium.Marker(o, popup="출발", icon=folium.Icon(color="blue", icon="play")).add_to(
         m
@@ -473,7 +463,7 @@ def draw_map(segs: list[dict], o: tuple[float, float], d: tuple[float, float]):
     folium.LayerControl().add_to(m)
     out = Path("route.html").resolve()
     m.save(str(out))
-    return out
+    return m, out          # ← (Map, HTML 경로) 튜플로 반환
 
 
 def odsay_all_routes(origin, dest, *, prefs: Dict | None = None) -> List[List[dict]]:
