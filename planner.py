@@ -47,11 +47,11 @@ DEFAULT_PREFS = {
 # API 키
 import os
 
-# ODSAY_KEY = os.getenv("ODSAY_KEY")
-# KAKAO_REST_KEY = os.getenv("KAKAO_REST_KEY")
-ODSAY_KEY = open("odsay_api.txt").read().strip()
+ODSAY_KEY = os.getenv("ODSAY_KEY")
+KAKAO_REST_KEY = os.getenv("KAKAO_REST_KEY")
+# ODSAY_KEY = open("odsay_api.txt").read().strip()
 # print(ODSAY_KEY)
-KAKAO_REST_KEY = open("kakao_api.txt").read().strip()
+# KAKAO_REST_KEY = open("kakao_api.txt").read().strip()
 # 혼잡도 CSV
 SUBWAY_CSV = Path("seoul_subway_crowd.csv")
 BUS_CSV = Path("seoul_bus_crowd.csv")
