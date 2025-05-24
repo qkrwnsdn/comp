@@ -1,180 +1,97 @@
 # -*- coding: utf-8 -*-
 """
-plannerui_front.py (rev-2025-05-24-b)
-===============================================================
-*FIX* : ‘지도(폴리움)가 잠깐 보였다가 사라지는’ 문제 해결
-----------------------------------------------------------------
-Streamlit 앱은 **실행이 한 번 끝날 때마다 전체 스크립트를 재실행**합니다.
-`st.button()` 안에서만 지도를 그리면, 버튼을 누른 직후 1 회차 렌더링에서만
-출력되고 다음 자동 재실행(2 회차)부터는 조건문이 건너뛰어 지도가 사라집니다.
+Streamlit UI (front‑call edition)
+=================================
+변경 핵심
+---------
+* **ODsay API 호출을 브라우저(프론트엔드)에서 수행**합니다.
+  Web 플랫폼용 API‑KEY를 노출해도 정상 동작하도록 ODsay 정책을 준수합니다.
+  (ODsay LAB 게시물에서 안내한 ‘프론트엔드 = Web 키’ 규칙)
+* 서버‑사이드 Python 은 **경로 스코어링 및 지도 그리기**만 담당합니다.
+* 새로운 의존성 **`streamlit‑javascript`**(MIT ‑ https://github.com/victoriadrake/streamlit‑javascript) 를 추가합니다.
+  브라우저에서 실행한 JS 의 반환값을 파이썬으로 가져오기 위해 사용합니다.
+* UI/레이아웃은 기존 `plannerui.py` 와 동일합니다.
 
-👉 **버튼을 누른 결과(경로·지도)를 `st.session_state`에 저장**하고,
-스크립트가 재실행될 때마다 세션 값이 있으면 지도를 다시 그리도록 구조를
-분리했습니다. 따라서 한 번 탐색한 경로는 사이드바 값을 바꿔도 유지됩니다.
+배포 전 준비
+-------------
+1. `requirements.txt` 에 다음을 추가
+   ```
+   streamlit
+   streamlit‑folium
+   streamlit‑javascript
+   orjson
+   folium
+   ```
+2. **Streamlit Cloud Secrets**(`.streamlit/secrets.toml`) 에 Web 키 저장
+   ```toml
+   [odsay]
+   web_key = "YOUR_WEBSITE_API_KEY"
+   ```
+3. ODsay 콘솔 ➜ Web 플랫폼에
+   `https://*.streamlit.app` (또는 실제 배포 도메인) 등록.
+
+코드
+----
+```python
 """
-from __future__ import annotations
-
 import os
+import inspect
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
-import requests
+import orjson
 import streamlit as st
 from streamlit.components.v1 import html as st_html
+from streamlit_javascript import st_javascript
 
-# ──────────────────────────────────────────────────────────────
-# 외부 유틸 · 시각화 모듈 (backend 일부 함수 재사용)
-# ──────────────────────────────────────────────────────────────
+# 내부 로직 ---------------------------------------------------------------
 from planner import (
+    paths_to_segs,  # NEW: raw JSON → seg 리스트 변환에 사용
+    choose_best_route,
     draw_map,
     load_prefs,
     save_prefs,
-    choose_best_route,
-    append_history,
     haversine,
+    AVG_WALK_SPEED,
+    append_history,
 )
 
 try:
-    from streamlit_folium import st_folium  # type: ignore
+    from streamlit_folium import st_folium  # noqa: F401  (미사용 경고 억제)
 except ImportError:
-    st_folium = None
+    pass
 
-# ──────────────────────────────────────────────────────────────
-# API 키, 상수 -------------------------------------------------------------
-# ──────────────────────────────────────────────────────────────
-_ODSAY_KEY_FILE = Path("odsay_api.txt")
-_KAKAO_KEY_FILE = Path("kakao_api.txt")
-ODSAY_KEY = os.getenv("ODSAY_KEY") or (
-    _ODSAY_KEY_FILE.read_text().strip() if _ODSAY_KEY_FILE.exists() else ""
+# ------------------------------------------------------------------------
+# 환경 변수 / 시크릿 -------------------------------------------------------
+ODsay_WEB_KEY = os.getenv(
+    "ODSAY_KEY"
+)  # : str | None = st.secrets.get("odsay", {}).get("web_key")  # type: ignore[arg-type]
+if not ODsay_WEB_KEY:
+    st.error("❗️ ODsay Web 키가 설정되지 않았습니다. secrets.toml 확인!")
+    st.stop()
+
+# ------------------------------------------------------------------------
+# Streamlit 설정 및 세션 초기화
+# ------------------------------------------------------------------------
+st.set_page_config(
+    page_title="멀티모달 경로 플래너",
+    layout="wide",
 )
-KAKAO_REST_KEY = os.getenv("KAKAO_REST_KEY") or (
-    _KAKAO_KEY_FILE.read_text().strip() if _KAKAO_KEY_FILE.exists() else ""
-)
-HEADERS = {"Authorization": f"KakaoAK {KAKAO_REST_KEY}"}
-AVG_WALK_SPEED = 1.3  # m/s
-
-# ──────────────────────────────────────────────────────────────
-# Kakao Geocoding ----------------------------------------------------------
-# ──────────────────────────────────────────────────────────────
-
-
-def geocode(addr: str) -> Tuple[float, float]:
-    for ep in ("address", "keyword"):
-        url = f"https://dapi.kakao.com/v2/local/search/{ep}.json"
-        r = requests.get(
-            url, headers=HEADERS, params={"query": addr}, timeout=5, verify=False
-        )
-        r.raise_for_status()
-        docs = r.json().get("documents", [])
-        if docs:
-            return float(docs[0]["y"]), float(docs[0]["x"])
-    raise ValueError(f"주소/역 '{addr}' 검색 실패")
-
-
-def parse_location(s: str) -> Tuple[float, float]:
-    try:
-        lat, lng = map(float, s.split(","))
-        return lat, lng
-    except ValueError:
-        return geocode(s)
-
-
-# ──────────────────────────────────────────────────────────────
-# ODsay API (프론트 직접 호출) ---------------------------------------------
-# ──────────────────────────────────────────────────────────────
-_MODE = {1: "SUBWAY", 2: "BUS", 3: "WALK"}
-
-
-def _segment_from_subpath(sp: dict) -> Dict:
-    tp = sp.get("trafficType")
-    mode = _MODE.get(tp, "WALK")
-    dur = float(sp.get("sectionTime", 0))  # 분
-    dist = float(sp.get("distance", 0))  # m
-
-    if tp == 1:
-        lane0 = sp.get("lane", [{}])[0]
-        name = (
-            lane0.get("laneName")
-            or lane0.get("name")
-            or lane0.get("subwayName")
-            or "지하철"
-        )
-    elif tp == 2:
-        name = sp.get("lane", [{}])[0].get("busNo", "버스")
-    else:
-        name = "도보"
-        dur = dist / (AVG_WALK_SPEED * 60)
-
-    coords = [
-        (float(x["y"]), float(x["x"]))
-        for x in sp.get("passStopList", {}).get("stations", [])
-    ]
-    return {
-        "mode": mode,
-        "name": name,
-        "distance_m": dist,
-        "duration_min": round(dur, 2),
-        "crowd": 1,
-        "best_car": None,
-        "poly": coords,
-    }
-
-
-def odsay_all_routes_front(
-    origin: Tuple[float, float], dest: Tuple[float, float]
-) -> List[List[Dict]]:
-    if not ODSAY_KEY:
-        st.error("❌  ODSAY API Key를 찾을 수 없습니다.")
-        return []
-
-    common = {
-        "apiKey": ODSAY_KEY,
-        "lang": 0,
-        "output": "json",
-        "SX": origin[1],
-        "SY": origin[0],
-        "EX": dest[1],
-        "EY": dest[0],
-        "OPT": 0,
-        "SearchPathType": 0,
-        "reqCoordType": "WGS84GEO",
-        "resCoordType": "WGS84GEO",
-    }
-    endpoints = [
-        ("https://api.odsay.com/v1/api/searchPubTransPath", {"SearchType": 0}),
-        ("https://api.odsay.com/v1/api/searchPubTransPathT", {"SearchType": 0}),
-    ]
-    candidates: List[List[Dict]] = []
-    for endpoint, extra in endpoints:
-        try:
-            r = requests.get(
-                endpoint, params={**common, **extra}, timeout=8, verify=False
-            )
-            r.raise_for_status()
-            for path in r.json().get("result", {}).get("path", []):
-                segs = [_segment_from_subpath(sp) for sp in path.get("subPath", [])]
-                if segs:
-                    candidates.append(segs)
-        except requests.RequestException:
-            continue
-    return candidates
-
-
-# ──────────────────────────────────────────────────────────────
-# Streamlit UI -------------------------------------------------------------
-# ──────────────────────────────────────────────────────────────
-
-st.set_page_config(page_title="멀티모달 경로 플래너 (프론트 API)", layout="wide")
 
 if "prefs" not in st.session_state:
     st.session_state["prefs"] = load_prefs()
+if "route" not in st.session_state:
+    st.session_state["route"] = None
 
-p: Dict = st.session_state["prefs"]
-
-# ── 사이드바 : 선호도 ------------------------------------------------------
+# ------------------------------------------------------------------------
+# Sidebar – 사용자 선호 입력
+# ------------------------------------------------------------------------
 with st.sidebar:
-    st.header("⚙️ 선호도 & 가중치 설정")
+    st.header("⚙️  선호도 & 가중치 설정")
+
+    p: Dict = st.session_state["prefs"]
+
     crowd_weight = st.slider(
         "혼잡도 가중치", 0.0, 5.0, float(p.get("crowd_weight", 2.0)), 0.1
     )
@@ -194,102 +111,208 @@ with st.sidebar:
         "도보", 0.0, 10.0, float(p.get("mode_penalty", {}).get("WALK", 0.0)), 0.5
     )
 
-    if st.button("💾 선호도 저장"):
-        save_prefs(
-            {
-                "crowd_weight": crowd_weight,
-                "max_crowd": max_crowd,
-                "walk_limit_min": walk_limit_min,
-                "mode_penalty": {"SUBWAY": mp_subway, "BUS": mp_bus, "WALK": mp_walk},
-                "runs": p.get("runs", 0) + 1,
-            }
-        )
-        st.session_state["prefs"].update(p)
-        st.success("✅ 선호도가 저장되었습니다!")
+    st.subheader("모드별 선호도")
+    pref_subway = st.number_input(
+        "지하철 선호도",
+        -10.0,
+        10.0,
+        float(p.get("mode_preference", {}).get("SUBWAY", 0.0)),
+        0.5,
+    )
+    pref_bus = st.number_input(
+        "버스 선호도",
+        -10.0,
+        10.0,
+        float(p.get("mode_preference", {}).get("BUS", 0.0)),
+        0.5,
+    )
+    pref_walk = st.number_input(
+        "도보 선호도",
+        -10.0,
+        10.0,
+        float(p.get("mode_preference", {}).get("WALK", 0.0)),
+        0.5,
+    )
 
-# ── 메인 영역 -------------------------------------------------------------
+    if st.button("💾  선호도 저장"):
+        to_save: Dict = {
+            "crowd_weight": crowd_weight,
+            "max_crowd": max_crowd,
+            "walk_limit_min": walk_limit_min,
+            "mode_penalty": {"SUBWAY": mp_subway, "BUS": mp_bus, "WALK": mp_walk},
+            "mode_preference": {
+                "SUBWAY": pref_subway,
+                "BUS": pref_bus,
+                "WALK": pref_walk,
+            },
+            "runs": p.get("runs", 0),
+        }
+        save_prefs(to_save)
+        st.session_state["prefs"] = to_save
+        st.success("✅  선호도가 영구 저장되었습니다!")
 
-st.title("🚍 ODsay 멀티모달 경로 플래너 · 프론트 API")
+    learn_mode = st.checkbox("🧠  학습 모드로 경로 기록", value=False)
 
+# ------------------------------------------------------------------------
+# Main – 입력 폼
+# ------------------------------------------------------------------------
+st.title("🚍  ODsay 멀티모달 경로 플래너 · Web API")
 col1, col2 = st.columns(2)
 with col1:
-    origin_input = st.text_input("출발지 (역명/주소/위도,경도)")
+    origin_input = st.text_input("출발지 (위도,경도)")
 with col2:
-    dest_input = st.text_input("도착지 (역명/주소/위도,경도)")
+    dest_input = st.text_input("도착지 (위도,경도)")
 
-search_clicked = st.button("🚀 경로 탐색")
+# ---------------------------------------------------
+# 공통 prefs dict (이번 세션용 – 저장 X)
+# ---------------------------------------------------
+current_prefs: Dict = {
+    "crowd_weight": crowd_weight,
+    "max_crowd": max_crowd,
+    "walk_limit_min": walk_limit_min,
+    "mode_penalty": {"SUBWAY": mp_subway, "BUS": mp_bus, "WALK": mp_walk},
+    "mode_preference": {"SUBWAY": pref_subway, "BUS": pref_bus, "WALK": pref_walk},
+}
 
-if search_clicked:
+# ------------------------------------------------------------------------
+# Helper – 브라우저에서 ODsay Web API 호출(JS) 후 JSON 문자열 반환
+# ------------------------------------------------------------------------
+
+JS_TEMPLATE = """
+async () => {
+  try {
+    const key = "%s";
+    const [sy, sx] = "%s".split(",").map(parseFloat);
+    const [ey, ex] = "%s".split(",").map(parseFloat);
+    if (isNaN(sx) || isNaN(sy) || isNaN(ex) || isNaN(ey)) {
+      return JSON.stringify({ error: "Invalid coordinate format" });
+    }
+    const base = `https://api.odsay.com/v1/api/searchPubTransPath`;
+    const params = new URLSearchParams({
+      SX: sx, SY: sy,
+      EX: ex, EY: ey,
+      SearchType: 0,
+      OPT: 0,
+      lang: 0,
+      output: "json",
+      reqCoordType: "WGS84GEO",
+      resCoordType: "WGS84GEO",
+      apiKey: key
+    });
+    const url = `${base}?${params.toString()}`;
+
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      return JSON.stringify({ error: `HTTP ${resp.status}` });
+    }
+    const data = await resp.json();
+    return JSON.stringify(data);
+  } catch (e) {
+    return JSON.stringify({ error: e.toString() });
+  }
+}
+"""
+
+# ------------------------------------------------------------------------
+# 버튼 – 경로 탐색
+# ------------------------------------------------------------------------
+
+if st.button("🚀  경로 탐색"):
     if not origin_input or not dest_input:
         st.warning("출발지와 도착지를 모두 입력하세요.")
-    else:
+        st.stop()
+
+    with st.spinner("브라우저에서 ODsay API 호출 중…"):
+        raw_json: str | None = st_javascript(
+            JS_TEMPLATE % (ODsay_WEB_KEY, origin_input, dest_input)
+        )
+
+    if not raw_json:
+        st.error("⚠️  JS 실행 실패 or 응답 없음")
+        st.stop()
+
+    resp = orjson.loads(raw_json)
+    if "error" in resp:
+        st.error(f"ODsay API 오류: {resp['error']}")
+        st.stop()
+
+    # --------------------------------------------------------------------
+    # 웹 API → 세그먼트 리스트 변환 (서버‑사이드 로직 그대로 재사용)
+    # --------------------------------------------------------------------
+    paths = resp.get("result", {}).get("path", [])
+    routes: List[List[Dict]] = [
+        paths_to_segs(p.get("subPath", []), prefs=current_prefs) for p in paths
+    ]
+
+    best_idx, segs = choose_best_route(routes, prefs=current_prefs)
+
+    if not segs:
+        # fallback: pure walk straight line
         try:
-            origin = parse_location(origin_input)
-            dest = parse_location(dest_input)
-        except ValueError as e:
-            st.error(str(e))
-        else:
-            with st.spinner("경로 계산 중…"):
-                routes = odsay_all_routes_front(origin, dest)
-                best_idx, segs = choose_best_route(routes)
-                if not segs:
-                    dist = haversine(origin, dest)
-                    segs = [
-                        {
-                            "mode": "WALK",
-                            "name": "직선도보",
-                            "distance_m": dist,
-                            "duration_min": round(dist / (AVG_WALK_SPEED * 60), 2),
-                            "crowd": 1,
-                            "best_car": None,
-                            "poly": [origin, dest],
-                        }
-                    ]
-                total_min = sum(s["duration_min"] for s in segs)
+            sy, sx = map(float, origin_input.split(","))
+            ey, ex = map(float, dest_input.split(","))
+            dist = haversine((sy, sx), (ey, ex))
+        except ValueError:
+            st.error("좌표 형식 오류")
+            st.stop()
+        segs = [
+            {
+                "mode": "WALK",
+                "name": "직선도보",
+                "distance_m": dist,
+                "duration_min": round(dist / (AVG_WALK_SPEED * 60), 2),
+                "crowd": 1,
+                "best_car": None,
+                "poly": [(sy, sx), (ey, ex)],
+            }
+        ]
 
-            # 결과 세션에 저장 → 다음 rerun에서도 유지
-            st.session_state.update(
-                {
-                    "segs": segs,
-                    "origin_coord": origin,
-                    "dest_coord": dest,
-                    "total_min": total_min,
-                    "origin_input": origin_input,
-                    "dest_input": dest_input,
-                }
-            )
-
-# ── 세션에 경로가 있으면 항상 지도·요약 표시 -----------------------------
-if "segs" in st.session_state:
-    segs = st.session_state["segs"]
-    origin = st.session_state["origin_coord"]
-    dest = st.session_state["dest_coord"]
-    total_min = st.session_state["total_min"]
-
-    st.subheader("📝 경로 요약")
+    # --------------------------------------------------------------------
+    # 요약 & 지도 출력
+    # --------------------------------------------------------------------
+    total_min = sum(s.get("duration_min", 0) for s in segs)
+    st.subheader("📝  경로 요약")
     for i, s in enumerate(segs, 1):
-        st.write(f"{i}. {s['mode']:<6} | {s['name']:<10} | {s['duration_min']:5.1f}분")
+        car = f" | 추천칸 {s.get('best_car')}" if s.get("best_car") else ""
+        st.write(
+            f"{i}. {s.get('mode'):<6} | {s.get('name'):<10} | {s.get('duration_min',0):5.1f}분{car}"
+        )
     st.success(f"예상 총 소요 시간: {total_min:.1f}분")
 
-    map_obj, _ = draw_map(segs, origin, dest)
-    if st_folium:
-        st_folium(map_obj, width=900, height=600)
-    else:
-        st_html(map_obj.get_root().render(), height=600, width=900, scrolling=False)
+    # 지도 (Folium) --------------------------------------------------------
+    # Folium 객체와 HTML 파일 경로 반환
+    map_obj, html_path = draw_map(
+        segs,
+        (float(origin_input.split(",")[0]), float(origin_input.split(",")[1])),
+        (float(dest_input.split(",")[0]), float(dest_input.split(",")[1])),
+    )
 
-    if st.checkbox("🧠 이 경로를 학습 기록에 저장"):
+    map_html = map_obj.get_root().render()
+    st.session_state["route"] = {"map": map_html, "segs": segs, "total_min": total_min}
+
+    if learn_mode:
         append_history(
             {
                 "datetime": datetime.now().isoformat(),
-                "origin": st.session_state.get("origin_input", ""),
-                "dest": st.session_state.get("dest_input", ""),
+                "origin": origin_input,
+                "dest": dest_input,
                 "total_min": total_min,
-                "modes": "/".join({s["mode"] for s in segs}),
+                "modes": "/".join({s.get("mode") for s in segs}),
             }
         )
-        st.info("📚 경로 이용 기록이 저장되었습니다.")
+        st.info("📚  경로 이용 기록이 저장되었습니다.")
 
-# ── 푸터 ---------------------------------------------------------------
+# ------------------------------------------------------------------------
+# 항상 지도 표시 (세션 상태에 저장해 둔 HTML 사용)
+# ------------------------------------------------------------------------
+if st.session_state.get("route"):
+    st.subheader("🗺️  경로 지도")
+    st_html(st.session_state["route"]["map"], height=600, width=900, scrolling=False)
+
+# ------------------------------------------------------------------------
+# Footer
+# ------------------------------------------------------------------------
+
 st.markdown(
     "---\n"
     "<div style='text-align:center;'>ⓒ 2025 Multimodal Route Planner UI · 개발: JunWooPark</div>",
