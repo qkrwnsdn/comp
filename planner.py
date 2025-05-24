@@ -49,9 +49,9 @@ import os
 
 ODSAY_KEY = os.getenv("ODSAY_KEY")
 KAKAO_REST_KEY = os.getenv("KAKAO_REST_KEY")
-# ODSAY_KEY = open("odsay_api.txt").read().strip()
+#ODSAY_KEY = open("odsay_api.txt").read().strip()
 # print(ODSAY_KEY)
-# KAKAO_REST_KEY = open("kakao_api.txt").read().strip()
+#KAKAO_REST_KEY = open("kakao_api.txt").read().strip()
 # 혼잡도 CSV
 SUBWAY_CSV = Path("seoul_subway_crowd.csv")
 BUS_CSV = Path("seoul_bus_crowd.csv")
@@ -179,7 +179,6 @@ def odsay_best_route(origin: Tuple[float, float], dest: Tuple[float, float]):
                 continue
 
             all_segs = []
-            print(len(paths))
             for path in paths:
                 segs = paths_to_segs(path.get("subPath", []))
                 score = score_route(segs)
@@ -187,7 +186,6 @@ def odsay_best_route(origin: Tuple[float, float], dest: Tuple[float, float]):
 
             if all_segs:
                 best = min(all_segs, key=lambda x: x[0])
-                print("==============")
                 return best[1]  # 최적 경로 반환
 
         except requests.RequestException:
