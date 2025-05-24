@@ -65,7 +65,7 @@ except ImportError:
 # ------------------------------------------------------------------------
 # 환경 변수 / 시크릿 -------------------------------------------------------
 ODsay_WEB_KEY = os.getenv(
-    "ODSAY_API"
+    "ODSAY_KEY"
 )  # : str | None = st.secrets.get("odsay", {}).get("web_key")  # type: ignore[arg-type]
 if not ODsay_WEB_KEY:
     st.error("❗️ ODsay Web 키가 설정되지 않았습니다. secrets.toml 확인!")
