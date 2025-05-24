@@ -179,6 +179,7 @@ def odsay_best_route(origin: Tuple[float, float], dest: Tuple[float, float]):
                 continue
 
             all_segs = []
+            print(len(paths))
             for path in paths:
                 segs = paths_to_segs(path.get("subPath", []))
                 score = score_route(segs)
@@ -186,6 +187,7 @@ def odsay_best_route(origin: Tuple[float, float], dest: Tuple[float, float]):
 
             if all_segs:
                 best = min(all_segs, key=lambda x: x[0])
+                print("==============")
                 return best[1]  # 최적 경로 반환
 
         except requests.RequestException:
