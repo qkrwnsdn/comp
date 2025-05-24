@@ -64,9 +64,7 @@ except ImportError:
 
 # ------------------------------------------------------------------------
 # 환경 변수 / 시크릿 -------------------------------------------------------
-ODsay_WEB_KEY = os.getenv(
-    "ODSAY_KEY"
-)  # : str | None = st.secrets.get("odsay", {}).get("web_key")  # type: ignore[arg-type]
+ODsay_WEB_KEY = "MB6dejFLdiEq9sEAw3S6iR9IZcGq367RTs4twpYF2yo"
 if not ODsay_WEB_KEY:
     st.error("❗️ ODsay Web 키가 설정되지 않았습니다. secrets.toml 확인!")
     st.stop()
@@ -231,8 +229,15 @@ if st.button("🚀  경로 탐색"):
         st.info("📡 브라우저 응답 대기 중… 잠시만요!")
         st.stop()
 
-    resp = orjson.loads(raw_json)
-    if "error" in resp:
+    # raw_json 타입(str 또는 dict)에 따라 분기
+    if isinstance(raw_json, str):
+        resp = orjson.loads(raw_json)
+    else:  # streamlit-javascript가 이미 파싱해서 dict로 넘겨준 경우
+        resp = raw_json
+    if not isinstance(resp, dict):
+        st.error(f"ODsay 응답 형식 오류: {resp!r}")
+        st.stop()
+    if isinstance(resp, dict) and resp.get("error"):
         st.error(f"ODsay API 오류: {resp['error']}")
         st.stop()
 
