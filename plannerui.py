@@ -223,12 +223,12 @@ if st.button("🚀  경로 탐색"):
         st.stop()
 
     with st.spinner("브라우저에서 ODsay API 호출 중…"):
-        raw_json: str | None = st_javascript(
-            JS_TEMPLATE % (ODsay_WEB_KEY, origin_input, dest_input)
-        )
+        # 변경
+        js_code = JS_TEMPLATE % (ODsay_WEB_KEY, origin_input, dest_input)
+        raw_json = st_javascript(js_code, key="odsay_route")  # 👈 key 꼭 넣기
 
-    if not raw_json:
-        st.error("⚠️  JS 실행 실패 or 응답 없음")
+    if raw_json is None:  # 첫 호출은 None
+        st.info("📡 브라우저 응답 대기 중… 잠시만요!")
         st.stop()
 
     resp = orjson.loads(raw_json)
