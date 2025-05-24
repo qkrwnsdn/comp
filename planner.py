@@ -47,11 +47,11 @@ DEFAULT_PREFS = {
 # API 키
 import os
 
-ODSAY_KEY = os.getenv("ODSAY_KEY")
-KAKAO_REST_KEY = os.getenv("KAKAO_REST_KEY")
-# ODSAY_KEY = open("odsay_api.txt").read().strip()
+# ODSAY_KEY = os.getenv("ODSAY_KEY")
+# KAKAO_REST_KEY = os.getenv("KAKAO_REST_KEY")
+ODSAY_KEY = open("odsay_api.txt").read().strip()
 # print(ODSAY_KEY)
-# KAKAO_REST_KEY = open("kakao_api.txt").read().strip()
+KAKAO_REST_KEY = open("kakao_api.txt").read().strip()
 # 혼잡도 CSV
 SUBWAY_CSV = Path("seoul_subway_crowd.csv")
 BUS_CSV = Path("seoul_bus_crowd.csv")
@@ -379,6 +379,7 @@ def crowd_gradient_color(level: int, max_level: int = 4) -> str:
     g = int(255 * (1 - ratio))
     return f"#{r:02x}{g:02x}00"
 
+
 def draw_map(segs: list[dict], o: tuple[float, float], d: tuple[float, float]):
     m = folium.Map(location=[(o[0] + d[0]) / 2, (o[1] + d[1]) / 2], zoom_start=13)
     folium.Marker(o, popup="출발", icon=folium.Icon(color="blue", icon="play")).add_to(
@@ -463,7 +464,7 @@ def draw_map(segs: list[dict], o: tuple[float, float], d: tuple[float, float]):
     folium.LayerControl().add_to(m)
     out = Path("route.html").resolve()
     m.save(str(out))
-    return m, out          # ← (Map, HTML 경로) 튜플로 반환
+    return m, out  # ← (Map, HTML 경로) 튜플로 반환
 
 
 def odsay_all_routes(origin, dest, *, prefs: Dict | None = None) -> List[List[dict]]:
