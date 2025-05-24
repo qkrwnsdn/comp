@@ -24,6 +24,26 @@ try:
 except ImportError:
     st_folium = None
 
+if "route" not in st.session_state:          # ①
+    st.session_state["route"] = None         # ①
+def run_planner():                                             # ②-a
+    if not st.session_state.origin or not st.session_state.dest:
+        st.warning("출발지와 도착지를 모두 입력하세요.")
+        return
+
+    origin = parse_location(st.session_state.origin)
+    dest   = parse_location(st.session_state.dest)
+
+    routes        = odsay_all_routes(origin, dest, prefs=current_prefs)
+    best_idx, segs = choose_best_route(routes, prefs=current_prefs)
+
+    map_obj, _ = draw_map(segs, origin, dest)
+
+    st.session_state["route"] = {                              # ②-b
+        "segs": segs,
+        "map": map_obj,
+        "total_min": sum(s["duration_min"] for s in segs),
+    }
 st.set_page_config(page_title="멀티모달 경로 플래너", layout="wide")
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -113,7 +133,7 @@ current_prefs: Dict = {
         "WALK": pref_walk,
     },
 }
-
+'''
 if st.button("🚀  경로 탐색"):
     if not origin_input or not dest_input:
         st.warning("출발지와 도착지를 모두 입력하세요.")
@@ -185,14 +205,39 @@ if st.button("🚀  경로 탐색"):
             "total_min": total_min,
             "modes": "/".join({s.get("mode") for s in segs}),
         })
-        st.info("📚  경로 이용 기록이 저장되었습니다.")
+    '''
+st.text_input("출발지 (역명/주소/위도,경도)", key="origin")     # ③
+st.text_input("도착지 (역명/주소/위도,경도)", key="dest")       # ③
 
+st.button("🚀  경로 탐색", on_click=run_planner, type="primary")  # ③
+st.info("📚  경로 이용 기록이 저장되었습니다.")
+
+if st.session_state["route"]:                                   # ④
+    r = st.session_state["route"]
+
+    st.subheader("📝  경로 요약")
+    for i, s in enumerate(r["segs"], 1):
+        st.write(f"{i}. {s['mode']} | {s['name']} | {s['duration_min']:.1f}분")
+    st.success(f"총 소요 {r['total_min']:.1f}분")
+
+    if st_folium:
+        st_folium(                                              # ④
+            r["map"],
+            width=900, height=600,
+            key="route_map",            # 고유 key 필요
+            returned_objects=[],        # 지도 클릭해도 재-런 최소화
+        )
+    else:
+        import webbrowser
+        html_file = Path("temp_map.html")
+        r["map"].save(str(html_file))
+        webbrowser.open(html_file.as_uri())
 # ──────────────────────────────────────────────────────────────────────────────
 # 푸터 -----------------------------------------------------------------------
 # ──────────────────────────────────────────────────────────────────────────────
 
 st.markdown(
     "---\n"
-    "<div style='text-align:center;'>ⓒ 2025 Multimodal Route Planner UI · 개발: JunWooPark</div>",
+    "<div style='text-align:center;'>ⓒ 2025 Multimodal Route Planner UI · 개발: Parkjunwoo</div>",
     unsafe_allow_html=True,
 )
